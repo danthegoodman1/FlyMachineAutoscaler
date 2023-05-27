@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
-	"github.com/danthegoodman1/FlyMachineAutoscaler/utils"
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
-	"os"
+)
+
+var (
+	Policies []Policy
 )
 
 type (
@@ -36,18 +38,15 @@ var (
 	DefaultDecreaseBy       = 1
 )
 
-func LoadConfig() error {
-	f, err := os.ReadFile(utils.Env_ConfigFile)
-	if err != nil {
-		return fmt.Errorf("error in os.Open: %w", err)
-	}
+func LoadConfig(f []byte) error {
 	fConfig := File{}
-	err = yaml.Unmarshal(f, &fConfig)
+	err := yaml.Unmarshal(f, &fConfig)
 	validate := validator.New()
 	err = validate.Struct(fConfig)
 	if err != nil {
 		return fmt.Errorf("error in validation: %w", err)
 	}
 	//validationErrors := err.(validator.ValidationErrors)
+	Policies = fConfig.Policies
 	return nil
 }
