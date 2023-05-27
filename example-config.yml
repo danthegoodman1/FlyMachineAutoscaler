@@ -1,0 +1,10 @@
+policies:
+  - name: cpu-scaler
+    # The average CPU usage across all instances in %.
+    # This works because the fly_instance_cpu is in centiseconds (0.01 sec), so 1 centisecond = 1%.
+    # Therefore, it is a % as an integer (e.g. 10% = 10).
+    # If you wanted it as a decimal divide the result by.
+    query: avg(sum(rate(fly_instance_cpu{mode!="idle"}[60s]))by(region, instance) / sum(count(fly_instance_cpu{app="firescroll-test", mode="idle"})without(cpu))by(instance, region))
+    # The `region` metric must appear in the response, otherwise the values will be ignored.
+    app: "firescroll-test"
+    regions: ["ewr", "ams", "mad", "mia", "gig", "atl"]
