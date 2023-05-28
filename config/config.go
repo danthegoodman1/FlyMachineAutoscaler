@@ -28,6 +28,7 @@ type (
 		//DecreaseBy       *int     `yaml:"decrease_by"`
 		HighThreshold float64 `yaml:"high_threshold" validate:"required"`
 		LowThreshold  float64 `yaml:"low_threshold" validate:"required"`
+		SaveVolumes   bool    `yaml:"save_volumes""`
 	}
 )
 

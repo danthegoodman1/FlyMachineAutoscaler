@@ -81,6 +81,73 @@ func DeleteMachine(ctx context.Context, app, instanceID string) error {
 	return nil
 }
 
+type FlyMachineConfig struct {
+	Id         string `json:"id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Region     string `json:"region"`
+	InstanceId string `json:"instance_id"`
+	PrivateIp  string `json:"private_ip"`
+	Config     struct {
+		Init struct {
+		} `json:"init"`
+		Services []struct {
+			Protocol     string `json:"protocol"`
+			InternalPort int    `json:"internal_port"`
+			Ports        []struct {
+				Port int `json:"port"`
+			} `json:"ports"`
+			ForceInstanceKey interface{} `json:"force_instance_key"`
+		} `json:"services"`
+		Checks map[string]struct {
+			Port     int    `json:"port"`
+			Type     string `json:"type"`
+			Interval string `json:"interval"`
+			Timeout  string `json:"timeout"`
+		} `json:"checks"`
+		Image   string `json:"image"`
+		Restart struct {
+		} `json:"restart"`
+		Guest struct {
+			CpuKind  string `json:"cpu_kind"`
+			Cpus     int    `json:"cpus"`
+			MemoryMb int    `json:"memory_mb"`
+		} `json:"guest"`
+		Mounts []struct {
+			Path   string `json:"path"`
+			Volume string `json:"volume"`
+		} `json:"mounts"`
+	} `json:"config"`
+	ImageRef struct {
+		Registry   string `json:"registry"`
+		Repository string `json:"repository"`
+		Tag        string `json:"tag"`
+		Digest     string `json:"digest"`
+		Labels     struct {
+			Maintainer string `json:"maintainer"`
+		} `json:"labels"`
+	} `json:"image_ref"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Events    []struct {
+		Id        string `json:"id"`
+		Type      string `json:"type"`
+		Status    string `json:"status"`
+		Source    string `json:"source"`
+		Timestamp int64  `json:"timestamp"`
+	} `json:"events"`
+	Checks []struct {
+		Name      string    `json:"name"`
+		Status    string    `json:"status"`
+		Output    string    `json:"output"`
+		UpdatedAt time.Time `json:"updated_at"`
+	} `json:"checks"`
+}
+
+func GetMachineInfo(ctx context.Context, app, instanceID string) (*FlyMachineConfig, error) {
+	return flyRequest[FlyMachineConfig](ctx, fmt.Sprintf("/%s/machines/%s", app, instanceID), "GET", nil)
+}
+
 func flyRequest[T any](ctx context.Context, path, method string, body any) (*T, error) {
 
 	bodyB, err := json.Marshal(body)

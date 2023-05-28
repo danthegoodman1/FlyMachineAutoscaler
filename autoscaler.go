@@ -17,6 +17,7 @@ import (
 var (
 	ErrHighStatusCode           = errors.New("high status code")
 	ErrQueryResultMissingRegion = errors.New("query result missing region")
+	ErrVolumesNotSupported      = errors.New("volumes not suppported")
 
 	LastScaleUp   map[string]time.Time
 	LastScaleDown map[string]time.Time
@@ -76,11 +77,38 @@ func QueryPrometheus(ctx context.Context, query string, t time.Time) (*PromQuery
 }
 
 func tickLoop() error {
-	randSource := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
 policyLoop:
 	for _, policy := range config.Policies {
-		// Get the metrics
+		// First we check for mins and maxes
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		machines, err := ListMachines(ctx, policy.App)
+		if err != nil {
+			return fmt.Errorf("error in ListMachines: %w", err)
+		}
+
+		// Handle regions
+		// Group by region
+		regionMap := map[string][]FlyListMachinesResp{}
+		for _, machine := range *machines {
+			if _, exists := regionMap[machine.Region]; !exists {
+				regionMap[machine.Region] = []FlyListMachinesResp{}
+			}
+			regionMap[machine.Region] = append(regionMap[machine.Region], machine)
+		}
+		// Check for min and max
+		var scaleUpRegions, scaleDownRegions []string
+		for region, regionMachines := range regionMap {
+			if policy.Min != nil && *policy.Min > len(regionMachines) {
+				scaleUpRegions = append(scaleUpRegions, region)
+			}
+			if policy.Max != nil && *policy.Max < len(regionMachines) {
+				scaleDownRegions = append(scaleDownRegions, region)
+			}
+		}
+
+		// Get the metrics
+		ctx, cancel = context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
 		metrics, err := QueryPrometheus(ctx, policy.Query, time.Now())
 		if err != nil {
@@ -101,12 +129,6 @@ policyLoop:
 			return nil
 		}
 
-		// Something needs scaling, let's get the machines
-		machines, err := ListMachines(ctx, policy.App)
-		if err != nil {
-			return fmt.Errorf("error in ListMachines: %w", err)
-		}
-
 		// For anything above, we need to scale up
 		for _, aboveRegion := range aboveRegions {
 			// Verify we are able to scale up based on cooldowns
@@ -114,19 +136,10 @@ policyLoop:
 				logger.Err(ErrQueryResultMissingRegion).Str("policy", policy.Name).Msg("policy query result missing region, skipping policy")
 				continue policyLoop
 			}
-			key := policy.App + aboveRegion.Metric["region"].(string)
-			checkTime := time.Now()
-			if lastUp, exists := LastScaleUp[key]; !exists || checkTime.Sub(lastUp) > time.Duration(utils.Deref(policy.CoolDownSec, config.DefaultCoolDownSec))*time.Second {
-				// TODO: get machine config
-				for i := 0; i < utils.Deref(policy.IncreaseBy, config.DefaultIncreaseBy); i++ {
-					ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-					defer cancel()
-					err := CreateMachine(ctx, policy.App, nil)
-					if err != nil {
-						return fmt.Errorf("error in CreateMachine: %w", err)
-					}
-				}
-				LastScaleUp[key] = checkTime
+			region := aboveRegion.Metric["region"].(string)
+			err = scaleUpRegion(ctx, policy, region, regionMap[region], (*machines)[0])
+			if err != nil {
+				return fmt.Errorf("error in scaleUpRegion: %w", err)
 			}
 		}
 
@@ -137,22 +150,65 @@ policyLoop:
 				logger.Err(ErrQueryResultMissingRegion).Str("policy", policy.Name).Msg("policy query result missing region, skipping policy")
 				continue policyLoop
 			}
-			key := policy.App + belowRegion.Metric["region"].(string)
-			checkTime := time.Now()
-			if lastUp, exists := LastScaleUp[key]; !exists || checkTime.Sub(lastUp) > time.Duration(utils.Deref(policy.CoolDownSec, config.DefaultCoolDownSec))*time.Second {
-				regionMachines := lo.Filter(*machines, func(item FlyListMachinesResp, index int) bool {
-					return item.Region == belowRegion.Metric["region"].(string)
-				})
-				randMachine := randSource.Intn(len(regionMachines))
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-				defer cancel()
-				err = DeleteMachine(ctx, policy.App, regionMachines[randMachine].Id)
-				if err != nil {
-					return fmt.Errorf("error in DeleteMachine: %w", err)
-				}
-				LastScaleDown[key] = checkTime
+			region := belowRegion.Metric["region"].(string)
+			err = scaleDownRegion(ctx, policy, region, regionMap[region])
+			if err != nil {
+				return fmt.Errorf("error in scaleDownRegion: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+func scaleUpRegion(ctx context.Context, policy config.Policy, region string, regionalMachines []FlyListMachinesResp, machineToClone FlyListMachinesResp) error {
+	key := policy.App + region
+	checkTime := time.Now()
+	if lastUp, exists := LastScaleUp[key]; !exists || checkTime.Sub(lastUp) > time.Duration(utils.Deref(policy.CoolDownSec, config.DefaultCoolDownSec))*time.Second {
+		// TODO: check for volume, get volume config, and create one
+		cloneConfig, err := GetMachineInfo(ctx, policy.App, machineToClone.Id)
+		if err != nil {
+			return fmt.Errorf("error in GetMachineInfo: %w", err)
+		}
+		if len(cloneConfig.Config.Mounts) > 0 {
+			return fmt.Errorf("machine %s to clone had a volume: %w", machineToClone.Id, ErrVolumesNotSupported)
+		}
+		for i := 0; i < utils.Deref(policy.IncreaseBy, config.DefaultIncreaseBy); i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
+			err := CreateMachine(ctx, policy.App, cloneConfig)
+			if err != nil {
+				return fmt.Errorf("error in CreateMachine: %w", err)
+			}
+		}
+		LastScaleUp[key] = checkTime
+	}
+	return nil
+}
+
+func scaleDownRegion(ctx context.Context, policy config.Policy, region string, regionalMachines []FlyListMachinesResp) error {
+	randSource := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+	key := policy.App + region
+	checkTime := time.Now()
+	if lastUp, exists := LastScaleUp[key]; !exists || checkTime.Sub(lastUp) > time.Duration(utils.Deref(policy.CoolDownSec, config.DefaultCoolDownSec))*time.Second {
+		candidateMachines := lo.Filter(regionalMachines, func(item FlyListMachinesResp, index int) bool {
+			return !lo.Contains(policy.ProtectedIds, item.Id)
+		})
+		randMachine := randSource.Intn(len(candidateMachines))
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+		machine, err := GetMachineInfo(ctx, policy.App, candidateMachines[randMachine].Id)
+		if err != nil {
+			return fmt.Errorf("error in GetMachineInfo: %w", err)
+		}
+		err = DeleteMachine(ctx, policy.App, candidateMachines[randMachine].Id)
+		if err != nil {
+			return fmt.Errorf("error in DeleteMachine: %w", err)
+		}
+		if !policy.SaveVolumes && len(machine.Config.Mounts) > 0 {
+			// TODO: If there was a volume on the machine, destroy that too
+			logger.Error().Err(ErrVolumesNotSupported).Str("machineID", machine.Id).Interface("mounts", machine.Config.Mounts).Msg("volume found on machine, ignoring on scale down!")
+		}
+		LastScaleDown[key] = checkTime
 	}
 	return nil
 }
