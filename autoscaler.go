@@ -137,7 +137,7 @@ policyLoop:
 				continue policyLoop
 			}
 			region := aboveRegion.Metric["region"].(string)
-			err = scaleUpRegion(ctx, policy, region, regionMap[region], (*machines)[0])
+			err = scaleUpRegion(ctx, policy, region, (*machines)[0])
 			if err != nil {
 				return fmt.Errorf("error in scaleUpRegion: %w", err)
 			}
@@ -160,7 +160,7 @@ policyLoop:
 	return nil
 }
 
-func scaleUpRegion(ctx context.Context, policy config.Policy, region string, regionalMachines []FlyListMachinesResp, machineToClone FlyListMachinesResp) error {
+func scaleUpRegion(ctx context.Context, policy config.Policy, region string, machineToClone FlyListMachinesResp) error {
 	key := policy.App + region
 	checkTime := time.Now()
 	if lastUp, exists := LastScaleUp[key]; !exists || checkTime.Sub(lastUp) > time.Duration(utils.Deref(policy.CoolDownSec, config.DefaultCoolDownSec))*time.Second {
