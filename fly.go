@@ -73,12 +73,12 @@ func ListMachines(ctx context.Context, app string) (*[]FlyListMachinesResp, erro
 	return flyRequest[[]FlyListMachinesResp](ctx, fmt.Sprintf("/%s/machines", app), "GET", nil)
 }
 
-func CreateMachine(ctx context.Context, app string, config any) {
-
+func CreateMachine(ctx context.Context, app string, config any) error {
+	return nil
 }
 
-func DeleteMachine(ctx context.Context, app, instanceID string) {
-
+func DeleteMachine(ctx context.Context, app, instanceID string) error {
+	return nil
 }
 
 func flyRequest[T any](ctx context.Context, path, method string, body any) (*T, error) {

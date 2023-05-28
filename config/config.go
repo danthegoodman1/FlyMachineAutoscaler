@@ -25,7 +25,9 @@ type (
 		ProtectedIds     []string `yaml:"protected_ids"`
 		Regions          []string `yaml:"regions" validate:"required""`
 		IncreaseBy       *int     `yaml:"increase_by"`
-		DecreaseBy       *int     `yaml:"decrease_by"`
+		//DecreaseBy       *int     `yaml:"decrease_by"`
+		HighThreshold float64 `yaml:"high_threshold" validate:"required"`
+		LowThreshold  float64 `yaml:"low_threshold" validate:"required"`
 	}
 )
 
